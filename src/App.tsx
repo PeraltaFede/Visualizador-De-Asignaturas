@@ -4,7 +4,8 @@ import {
   BarChart, List, Grid, GitGraph,
   Upload, Download, FileJson, X, Layout,
   Variable, Atom, FlaskConical, PenTool, CircuitBoard,
-  SquareActivity, Factory, SquareTerminal
+  SquareActivity, Factory, SquareTerminal,
+  Pencil, PencilOff, Trash2, Plus
 } from 'lucide-react';
 
 interface Subject {
@@ -29,6 +30,167 @@ interface CategoryGroup {
   techs: Set<string>;
 }
 
+// --- MODO EDICIÓN: estilos y componentes auxiliares ---
+const editFieldClass = 'border border-amber-300 bg-amber-50/60 rounded px-2 py-1 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400';
+
+const EDIT_HINTS: Record<string, string> = {
+  subjects: 'Modifica directamente los campos de cada asignatura, elimínalas o añade nuevas al final de la tabla.',
+  dependencies: 'Selecciona una asignatura y pulsa otra de un semestre anterior (requisito) o posterior (desbloquea) para añadir o quitar la dependencia. Vuelve a pulsar la seleccionada para soltarla.',
+  areas: 'Renombra áreas, mueve asignaturas entre áreas o crea un área nueva.',
+  techs: 'Renombra o elimina tecnologías, quítalas de una asignatura o asígnalas a otras.',
+};
+
+// Posición temporal de una asignatura (0 = Año 1 Sem 1, 1 = Año 1 Sem 2, ...)
+const getPeriodIndex = (subject: Subject) => (subject.year - 1) * 2 + (subject.semester - 1);
+
+// Campo de texto que guarda al pulsar Enter o al salir del campo (Escape descarta)
+const EditableText = ({ value, onCommit, className = '', placeholder, list }: {
+  value: string;
+  onCommit: (value: string) => void;
+  className?: string;
+  placeholder?: string;
+  list?: string;
+}) => {
+  const [draft, setDraft] = useState<string | null>(null);
+  const discardRef = useRef(false);
+
+  const commit = () => {
+    const next = draft?.trim();
+    if (!discardRef.current && next && next !== value) onCommit(next);
+    discardRef.current = false;
+    setDraft(null);
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft ?? value}
+      placeholder={placeholder}
+      list={list}
+      onFocus={() => setDraft(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') {
+          discardRef.current = true;
+          e.currentTarget.blur();
+        }
+      }}
+      className={`${editFieldClass} ${className}`}
+    />
+  );
+};
+
+// Campo para añadir un elemento nuevo (Enter o botón "+")
+const AddTextInput = ({ onAdd, placeholder, list, className = '' }: {
+  onAdd: (value: string) => void;
+  placeholder: string;
+  list?: string;
+  className?: string;
+}) => {
+  const [text, setText] = useState('');
+
+  const submit = () => {
+    const value = text.trim();
+    if (!value) return;
+    onAdd(value);
+    setText('');
+  };
+
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <input
+        type="text"
+        value={text}
+        placeholder={placeholder}
+        list={list}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
+          if (e.key === 'Escape') setText('');
+        }}
+        className={`${editFieldClass} flex-1 min-w-0`}
+      />
+      <button
+        type="button"
+        onClick={submit}
+        disabled={!text.trim()}
+        title="Añadir"
+        className="p-1.5 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+};
+
+// Desplegable que ejecuta una acción al elegir una asignatura y vuelve a su estado inicial
+const SubjectPicker = ({ subjects, placeholder, onPick }: {
+  subjects: Subject[];
+  placeholder: string;
+  onPick: (id: number) => void;
+}) => (
+  <select
+    value=""
+    onChange={(e) => { if (e.target.value) onPick(Number(e.target.value)); }}
+    disabled={subjects.length === 0}
+    className={`${editFieldClass} w-full text-sm disabled:opacity-50`}
+  >
+    <option value="">{placeholder}</option>
+    {subjects.map(s => (
+      <option key={s.id} value={s.id}>{s.year}º · {s.name}</option>
+    ))}
+  </select>
+);
+
+// Tarjeta para crear un grupo nuevo (área o tecnología) a partir de una asignatura
+const NewGroupCard = ({ title, namePlaceholder, hint, subjects, onCreate }: {
+  title: string;
+  namePlaceholder: string;
+  hint: string;
+  subjects: Subject[];
+  onCreate: (name: string, subjectId: number) => void;
+}) => {
+  const [name, setName] = useState('');
+  const [subjectId, setSubjectId] = useState('');
+  const canCreate = name.trim() !== '' && subjectId !== '';
+
+  return (
+    <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50/40 p-5 flex flex-col gap-3">
+      <h3 className="text-lg font-bold text-amber-700 flex items-center gap-2">
+        <Plus className="w-5 h-5" /> {title}
+      </h3>
+      <input
+        type="text"
+        value={name}
+        placeholder={namePlaceholder}
+        onChange={(e) => setName(e.target.value)}
+        className={editFieldClass}
+      />
+      <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className={`${editFieldClass} text-sm`}>
+        <option value="">Asignatura…</option>
+        {subjects.map(s => (
+          <option key={s.id} value={s.id}>{s.year}º · {s.name}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={!canCreate}
+        onClick={() => {
+          onCreate(name.trim(), Number(subjectId));
+          setName('');
+          setSubjectId('');
+        }}
+        className="bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 px-4 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Crear
+      </button>
+      <p className="text-xs text-slate-500">{hint}</p>
+    </div>
+  );
+};
+
 const App = () => {
   // DATOS POR DEFECTO
   const defaultSubjects: Subject[] = [{ "id": 1, "year": 1, "semester": 1, "name": "Expresión Gráfica y CAD", "category": "Diseño en ingeniería", "tech": ["Solidworks"], "prerequisites": [] }, { "id": 2, "year": 1, "semester": 1, "name": "Física I", "category": "Física", "tech": [], "prerequisites": [] }, { "id": 3, "year": 1, "semester": 1, "name": "Introducción a la Economía y la Empresa", "category": "Gestión industrial", "tech": [], "prerequisites": [] }, { "id": 4, "year": 1, "semester": 1, "name": "Matemáticas I", "category": "Matemáticas y análisis", "tech": [], "prerequisites": [] }, { "id": 5, "year": 1, "semester": 1, "name": "Química General", "category": "Química", "tech": [], "prerequisites": [] }, { "id": 6, "year": 1, "semester": 2, "name": "Estadística y Modelado de Datos", "category": "Matemáticas y análisis", "tech": [], "prerequisites": [4] }, { "id": 7, "year": 1, "semester": 2, "name": "Física II", "category": "Física", "tech": [], "prerequisites": [2] }, { "id": 8, "year": 1, "semester": 2, "name": "Informática", "category": "Informática", "tech": ["Matlab"], "prerequisites": [] }, { "id": 9, "year": 1, "semester": 2, "name": "Matemáticas II", "category": "Matemáticas y análisis", "tech": [], "prerequisites": [4] }, { "id": 10, "year": 1, "semester": 2, "name": "Tecnología del Medio Ambiente", "category": "Química", "tech": [], "prerequisites": [5] }, { "id": 11, "year": 2, "semester": 1, "name": "Ciencia de Materiales", "category": "Química", "tech": [], "prerequisites": [5] }, { "id": 12, "year": 2, "semester": 1, "name": "Ecuaciones Diferenciales", "category": "Matemáticas y análisis", "tech": [], "prerequisites": [9] }, { "id": 13, "year": 2, "semester": 1, "name": "Electrical Engineering", "category": "Sistemas eléctricos y electrónicos", "tech": [], "prerequisites": [7] }, { "id": 14, "year": 2, "semester": 1, "name": "Mecanismos y Elementos de Máquinas", "category": "Diseño en ingeniería", "tech": ["Simulink"], "prerequisites": [1] }, { "id": 15, "year": 2, "semester": 1, "name": "Termodinámica y Transferencia de Calor", "category": "Química", "tech": [], "prerequisites": [7] }, { "id": 16, "year": 2, "semester": 2, "name": "Automatic Control", "category": "Control y automatización", "tech": ["Simulink", "Matlab"], "prerequisites": [12] }, { "id": 17, "year": 2, "semester": 2, "name": "Mecánica y Máquinas de Fluidos", "category": "Física", "tech": [], "prerequisites": [7, 15] }, { "id": 18, "year": 2, "semester": 2, "name": "Modelado y Simulación de Sistemas", "category": "Control y automatización", "tech": ["Simulink"], "prerequisites": [12] }, { "id": 19, "year": 2, "semester": 2, "name": "Resistencia de Materiales", "category": "Diseño en ingeniería", "tech": [], "prerequisites": [2, 11] }, { "id": 20, "year": 2, "semester": 2, "name": "Tecnología Electrónica", "category": "Sistemas eléctricos y electrónicos", "tech": ["Falstad"], "prerequisites": [13] }, { "id": 21, "year": 3, "semester": 1, "name": "Automatización Industrial e Instrumentación", "category": "Control y automatización", "tech": ["CodeSys", "Factory IO"], "prerequisites": [16] }, { "id": 22, "year": 3, "semester": 1, "name": "Electrónica Digital y Microcontroladores", "category": "Sistemas eléctricos y electrónicos", "tech": ["Arduino IDE", "C/C++", "Solidworks", "Fritzing"], "prerequisites": [20, 8] }, { "id": 23, "year": 3, "semester": 1, "name": "Humanismo y Ética Básica", "category": "Gestión industrial", "tech": [], "prerequisites": [] }, { "id": 24, "year": 3, "semester": 1, "name": "Robotics", "category": "Control y automatización", "tech": ["RobotStudio", "Simulink", "ROS2"], "prerequisites": [16, 14] }, { "id": 25, "year": 3, "semester": 1, "name": "Tecnologías de Fabricación", "category": "Diseño en ingeniería", "tech": [], "prerequisites": [11] }, { "id": 26, "year": 3, "semester": 2, "name": "Control de Máquinas y Accionamientos Eléctricos", "category": "Sistemas eléctricos y electrónicos", "tech": ["CadeSimu", "Matlab", "Simulink"], "prerequisites": [13, 20] }, { "id": 27, "year": 3, "semester": 2, "name": "Electrónica de Potencia", "category": "Sistemas eléctricos y electrónicos", "tech": ["Simscape", "Falstad"], "prerequisites": [13, 20] }, { "id": 28, "year": 3, "semester": 2, "name": "Informática Industrial y Comunicaciones", "category": "Informática", "tech": ["Python", "Schneider", "AVEVA"], "prerequisites": [8, 22] }, { "id": 29, "year": 3, "semester": 2, "name": "Ingeniería de Control", "category": "Control y automatización", "tech": ["Matlab", "Simulink", "ROS2", "SSH"], "prerequisites": [16, 12] }, { "id": 30, "year": 3, "semester": 2, "name": "Sistemas Inteligentes", "category": "Informática", "tech": ["Python"], "prerequisites": [8, 24] }, { "id": 31, "year": 4, "semester": 1, "name": "Cálculo y Diseño de Máquinas", "category": "Diseño en ingeniería", "tech": ["Solidworks"], "prerequisites": [14, 19] }, { "id": 32, "year": 4, "semester": 1, "name": "Optativas", "category": "Global", "tech": [], "prerequisites": [] }, { "id": 33, "year": 4, "semester": 1, "name": "Real Time and Embedded Systems", "category": "Informática", "tech": ["C/C++", "SSH", "QNX"], "prerequisites": [28, 22] }, { "id": 34, "year": 4, "semester": 1, "name": "Robot Programming and Control", "category": "Control y automatización", "tech": ["Matlab", "Simulink", "RobotStudio"], "prerequisites": [24, 29] }, { "id": 35, "year": 4, "semester": 1, "name": "Visión y Percepción Automáticas", "category": "Informática", "tech": ["Python"], "prerequisites": [30, 8] }, { "id": 36, "year": 4, "semester": 2, "name": "Proyectos de Mecatrónica y Robótica", "category": "Global", "tech": [], "prerequisites": [34, 33] }, { "id": 37, "year": 4, "semester": 2, "name": "Prácticas", "category": "Global", "tech": [], "prerequisites": [] }, { "id": 38, "year": 4, "semester": 2, "name": "Trabajo Fin de Grado", "category": "Global", "tech": [], "prerequisites": [] }];
@@ -43,6 +205,8 @@ const App = () => {
   const [showDataModal, setShowDataModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [editMode, setEditMode] = useState(false);
 
   const activeSubjectId = selectedSubject || hoveredSubject;
 
@@ -140,6 +304,108 @@ const App = () => {
     if (directUnlock) return 'unlocked';
 
     return 'dimmed';
+  };
+
+  // --- MODO EDICIÓN: opciones y modificaciones de datos ---
+  const allCategories = useMemo(
+    () => Array.from(new Set(subjects.map(s => s.category))).sort((a, b) => a.localeCompare(b)),
+    [subjects]
+  );
+  const allTechs = useMemo(
+    () => Array.from(new Set(subjects.flatMap(s => s.tech))).sort((a, b) => a.localeCompare(b)),
+    [subjects]
+  );
+
+  const updateSubject = (id: number, changes: Partial<Subject>) => {
+    setSubjects(prev => prev.map(s => s.id === id ? { ...s, ...changes } : s));
+  };
+
+  const addSubject = (data: Partial<Subject> & { name: string }) => {
+    setSubjects(prev => {
+      const nextId = prev.reduce((max, s) => Math.max(max, s.id), 0) + 1;
+      return [...prev, { id: nextId, year: 1, semester: 1, category: 'Sin área', tech: [], prerequisites: [], ...data }];
+    });
+  };
+
+  const deleteSubject = (subject: Subject) => {
+    if (!window.confirm(`¿Eliminar la asignatura "${subject.name}"?`)) return;
+    setSubjects(prev => prev
+      .filter(s => s.id !== subject.id)
+      .map(s => ({ ...s, prerequisites: (s.prerequisites || []).filter(p => p !== subject.id) })));
+    if (selectedSubject === subject.id) setSelectedSubject(null);
+    setHoveredSubject(null);
+  };
+
+  const togglePrerequisite = (subjectId: number, prerequisiteId: number) => {
+    setSubjects(prev => prev.map(s => {
+      if (s.id !== subjectId) return s;
+      const prereqs = s.prerequisites || [];
+      return {
+        ...s,
+        prerequisites: prereqs.includes(prerequisiteId)
+          ? prereqs.filter(p => p !== prerequisiteId)
+          : [...prereqs, prerequisiteId]
+      };
+    }));
+  };
+
+  const renameCategory = (oldName: string, newName: string) => {
+    setSubjects(prev => prev.map(s => s.category === oldName ? { ...s, category: newName } : s));
+  };
+
+  const addTech = (subjectId: number, techName: string) => {
+    setSubjects(prev => prev.map(s =>
+      s.id === subjectId && !s.tech.includes(techName) ? { ...s, tech: [...s.tech, techName] } : s
+    ));
+  };
+
+  const removeTech = (subjectId: number, techName: string) => {
+    setSubjects(prev => prev.map(s =>
+      s.id === subjectId ? { ...s, tech: s.tech.filter(t => t !== techName) } : s
+    ));
+  };
+
+  const renameTech = (oldName: string, newName: string) => {
+    setSubjects(prev => prev.map(s =>
+      s.tech.includes(oldName)
+        ? { ...s, tech: Array.from(new Set(s.tech.map(t => t === oldName ? newName : t))) }
+        : s
+    ));
+  };
+
+  const deleteTech = (techName: string) => {
+    if (!window.confirm(`¿Eliminar la tecnología "${techName}" de todas las asignaturas?`)) return;
+    setSubjects(prev => prev.map(s => ({ ...s, tech: s.tech.filter(t => t !== techName) })));
+  };
+
+  // Asignatura fijada que sirve de referencia para editar dependencias
+  const editAnchor = editMode ? subjects.find(s => s.id === selectedSubject) : undefined;
+
+  const handleDependencyClick = (subject: Subject) => {
+    if (!editAnchor || editAnchor.id === subject.id) {
+      setSelectedSubject(selectedSubject === subject.id ? null : subject.id);
+      return;
+    }
+    if ((editAnchor.prerequisites || []).includes(subject.id)) {
+      togglePrerequisite(editAnchor.id, subject.id);
+    } else if ((subject.prerequisites || []).includes(editAnchor.id)) {
+      togglePrerequisite(subject.id, editAnchor.id);
+    } else if (getPeriodIndex(subject) < getPeriodIndex(editAnchor)) {
+      togglePrerequisite(editAnchor.id, subject.id);
+    } else if (getPeriodIndex(subject) > getPeriodIndex(editAnchor)) {
+      togglePrerequisite(subject.id, editAnchor.id);
+    } else {
+      // Mismo semestre: no puede haber dependencia, se cambia la selección
+      setSelectedSubject(subject.id);
+    }
+  };
+
+  const getDependencyEditHint = (subject: Subject, status: string) => {
+    if (!editAnchor || hoveredSubject !== subject.id || subject.id === editAnchor.id) return null;
+    if (status === 'prerequisite' || status === 'unlocked') return 'Quitar';
+    if (getPeriodIndex(subject) < getPeriodIndex(editAnchor)) return '+ Requisito';
+    if (getPeriodIndex(subject) > getPeriodIndex(editAnchor)) return '+ Desbloquea';
+    return 'Seleccionar';
   };
 
   const handleDownload = () => {
@@ -241,13 +507,38 @@ const App = () => {
               Gestión académica visual de asignaturas y competencias.
             </p>
           </div>
-          <button
-            onClick={() => setShowDataModal(true)}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700 transition-colors text-sm font-medium"
-          >
-            <FileJson className="w-4 h-4" /> Configuración
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              aria-pressed={editMode}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow transition-colors text-sm font-medium border ${editMode
+                ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
+                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+            >
+              {editMode ? <Pencil className="w-4 h-4" /> : <PencilOff className="w-4 h-4" />}
+              {editMode ? 'Edición Activada' : 'Edición Desactivada'}
+            </button>
+            <button
+              onClick={() => setShowDataModal(true)}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700 transition-colors text-sm font-medium"
+            >
+              <FileJson className="w-4 h-4" /> Configuración
+            </button>
+          </div>
         </div>
+
+        {/* Sugerencias para los campos de edición */}
+        {editMode && (
+          <>
+            <datalist id="category-options">
+              {allCategories.map(c => <option key={c} value={c} />)}
+            </datalist>
+            <datalist id="tech-options">
+              {allTechs.map(t => <option key={t} value={t} />)}
+            </datalist>
+          </>
+        )}
 
         {/* Modal Datos */}
         {showDataModal && (
@@ -334,6 +625,15 @@ const App = () => {
               />
             </div>
           )}
+
+          {editMode && (
+            <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <Pencil className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                <span className="font-semibold">Modo edición.</span> {EDIT_HINTS[viewMode]} Los cambios no se guardan automáticamente: expórtalos en JSON desde Configuración.
+              </span>
+            </div>
+          )}
         </div>
 
         {/* --- VISTA: DEPENDENCIAS --- */}
@@ -351,18 +651,13 @@ const App = () => {
                       {subjects.filter(s => s.year === year && s.semester === sem).map(subject => {
                         const status = getConnectionStatus(subject.id);
                         const isSelected = selectedSubject === subject.id; // Check para estilo extra si es necesario
+                        const editHint = getDependencyEditHint(subject, status);
 
                         return (
                           <div
                             key={subject.id}
-                            // *** MODIFICADO: Evento Click para fijar/desfijar ***
-                            onClick={() => {
-                              if (selectedSubject === subject.id) {
-                                setSelectedSubject(null);
-                              } else {
-                                setSelectedSubject(subject.id);
-                              }
-                            }}
+                            // *** MODIFICADO: Evento Click para fijar/desfijar (y editar dependencias en modo edición) ***
+                            onClick={() => handleDependencyClick(subject)}
                             onMouseEnter={() => setHoveredSubject(subject.id)}
                             onMouseLeave={() => setHoveredSubject(null)}
                             className={`p-3 rounded-lg border text-sm transition-all cursor-pointer h-[100px] flex flex-col justify-between ${status === 'active' ?
@@ -372,21 +667,41 @@ const App = () => {
                               status === 'prerequisite' ? 'bg-red-50 border-red-400 text-red-800' :
                                 status === 'unlocked' ? 'bg-emerald-50 border-emerald-400 text-emerald-800' :
                                   status === 'dimmed' ? 'bg-slate-50 border-slate-100 text-slate-300 opacity-60' : 'bg-white border-slate-200 hover:border-indigo-300'
-                              }`}
+                              } ${editHint ? 'opacity-100! border-amber-400! border-dashed' : ''}`}
                           >
-                            <div className="font-bold leading-tight flex justify-between">
+                            <div className="font-bold leading-tight flex justify-between gap-2">
                               {subject.name}
-                              {/* Indicador visual opcional de "fijado" */}
-                              {isSelected && <div className="h-2 w-2 rounded-full bg-indigo-600 animate-pulse"></div>}
+                              <div className="flex items-start gap-1.5 shrink-0">
+                                {/* Indicador visual opcional de "fijado" */}
+                                {isSelected && <div className="h-2 w-2 mt-1 rounded-full bg-indigo-600 animate-pulse"></div>}
+                                {editMode && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); deleteSubject(subject); }}
+                                    title="Eliminar asignatura"
+                                    className="p-0.5 rounded bg-transparent text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <div className="flex justify-between items-end text-xs">
                               <span className="font-semibold">{subject.category}</span>
-                              {status === 'prerequisite' && <span className="font-bold text-red-500">Requisito</span>}
-                              {status === 'unlocked' && <span className="font-bold text-emerald-600">Desbloquea</span>}
+                              {editHint ? <span className="font-bold text-amber-600">{editHint}</span> : <>
+                                {status === 'prerequisite' && <span className="font-bold text-red-500">Requisito</span>}
+                                {status === 'unlocked' && <span className="font-bold text-emerald-600">Desbloquea</span>}
+                              </>}
                             </div>
                           </div>
                         );
                       })}
+                      {editMode && (
+                        <AddTextInput
+                          placeholder="Nueva asignatura…"
+                          onAdd={(name) => addSubject({ name, year, semester: sem })}
+                          className="text-sm"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -402,11 +717,19 @@ const App = () => {
               <div key={group.name} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
                 <div className="p-5 border-b border-slate-50">
                   <div className="flex justify-between items-center mb-2">
-                    <div className="flex items-center gap-3">
+                    <div className={`flex items-center gap-3 min-w-0 ${editMode ? 'flex-1 mr-2' : ''}`}>
                       <div className="p-2 bg-slate-50 rounded-lg">
                         {getCategoryIcon(group.name)}
                       </div>
-                      <h3 className="text-lg font-bold text-slate-800">{group.name}</h3>
+                      {editMode ? (
+                        <EditableText
+                          value={group.name}
+                          onCommit={(name) => renameCategory(group.name, name)}
+                          className="text-lg font-bold flex-1 min-w-0"
+                        />
+                      ) : (
+                        <h3 className="text-lg font-bold text-slate-800">{group.name}</h3>
+                      )}
                     </div>
                     <span className="bg-indigo-600 text-white px-2.5 py-0.5 rounded-full text-xs font-bold">
                       {group.subjects.length}
@@ -426,13 +749,43 @@ const App = () => {
                     {group.subjects.map(s => (
                       <li key={s.id} className="text-sm text-slate-600 flex justify-between items-center bg-white p-2 rounded border border-slate-100">
                         <span className="font-medium truncate mr-2">{s.name}</span>
-                        <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-bold whitespace-nowrap">{s.year}º AÑO</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {editMode && (
+                            <select
+                              value={s.category}
+                              onChange={(e) => updateSubject(s.id, { category: e.target.value })}
+                              title="Mover a otra área"
+                              className={`${editFieldClass} text-[11px] py-0.5 px-1 max-w-[130px]`}
+                            >
+                              {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          )}
+                          <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-bold whitespace-nowrap">{s.year}º AÑO</span>
+                        </div>
                       </li>
                     ))}
                   </ul>
+                  {editMode && (
+                    <div className="mt-3">
+                      <SubjectPicker
+                        subjects={subjects.filter(s => s.category !== group.name)}
+                        placeholder="+ Mover asignatura a esta área…"
+                        onPick={(id) => updateSubject(id, { category: group.name })}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
+            {editMode && (
+              <NewGroupCard
+                title="Nueva área"
+                namePlaceholder="Nombre del área"
+                hint="La asignatura elegida se moverá a la nueva área (un área existe mientras tenga asignaturas)."
+                subjects={subjects}
+                onCreate={(name, id) => updateSubject(id, { category: name })}
+              />
+            )}
           </div>
         )}
 
@@ -441,11 +794,30 @@ const App = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {groupedTechs.map((tech) => (
               <div key={tech.name} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="text-lg font-bold text-indigo-700">{tech.name}</h3>
-                  <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full text-xs font-bold border border-slate-200">
-                    {tech.subjects.length}
-                  </span>
+                <div className="flex justify-between items-start mb-3 gap-2">
+                  {editMode ? (
+                    <EditableText
+                      value={tech.name}
+                      onCommit={(name) => renameTech(tech.name, name)}
+                      className="text-lg font-bold text-indigo-700! flex-1 min-w-0"
+                    />
+                  ) : (
+                    <h3 className="text-lg font-bold text-indigo-700">{tech.name}</h3>
+                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full text-xs font-bold border border-slate-200">
+                      {tech.subjects.length}
+                    </span>
+                    {editMode && (
+                      <button
+                        onClick={() => deleteTech(tech.name)}
+                        title="Eliminar tecnología de todas las asignaturas"
+                        className="p-1.5 rounded bg-transparent text-slate-400 hover:text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-1 mb-3">
                   {Array.from(tech.categories).map(cat => (
@@ -458,12 +830,41 @@ const App = () => {
                   {tech.subjects.map(s => (
                     <li key={s.id} className="text-sm text-slate-700 flex justify-between items-center">
                       <span className="truncate mr-2">{s.name}</span>
-                      <span className="text-xs text-slate-400">{s.year}º</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-slate-400">{s.year}º</span>
+                        {editMode && (
+                          <button
+                            onClick={() => removeTech(s.id, tech.name)}
+                            title={`Quitar ${tech.name} de esta asignatura`}
+                            className="p-0.5 rounded bg-transparent text-slate-400 hover:text-red-600 hover:bg-red-50"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
+                {editMode && (
+                  <div className="mt-3">
+                    <SubjectPicker
+                      subjects={subjects.filter(s => !s.tech.includes(tech.name))}
+                      placeholder="+ Añadir a asignatura…"
+                      onPick={(id) => addTech(id, tech.name)}
+                    />
+                  </div>
+                )}
               </div>
             ))}
+            {editMode && (
+              <NewGroupCard
+                title="Nueva tecnología"
+                namePlaceholder="Nombre de la tecnología"
+                hint="La tecnología se añadirá a la asignatura elegida."
+                subjects={subjects}
+                onCreate={(name, id) => addTech(id, name)}
+              />
+            )}
           </div>
         )}
 
@@ -478,6 +879,7 @@ const App = () => {
                     <th className="p-4 font-semibold">Asignatura</th>
                     <th className="p-4 font-semibold">Área</th>
                     <th className="p-4 font-semibold">Tecnologías</th>
+                    {editMode && <th className="p-4 font-semibold w-16 text-center">Acciones</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -485,32 +887,115 @@ const App = () => {
                     filteredSubjects.map((subject) => (
                       <tr key={subject.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-4 text-center">
-                          <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs border border-slate-200 font-medium">{subject.year}º</span>
+                          {editMode ? (
+                            <select
+                              value={subject.year}
+                              onChange={(e) => updateSubject(subject.id, { year: Number(e.target.value) })}
+                              title="Curso"
+                              className={`${editFieldClass} text-xs`}
+                            >
+                              {[1, 2, 3, 4].map(y => <option key={y} value={y}>{y}º</option>)}
+                            </select>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs border border-slate-200 font-medium">{subject.year}º</span>
+                          )}
                         </td>
                         <td className="p-4">
-                          <div className="font-medium text-slate-800">{subject.name}</div>
-                          <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-bold">Semestre {subject.semester}</div>
+                          {editMode ? (
+                            <div className="flex flex-col gap-1.5">
+                              <EditableText
+                                value={subject.name}
+                                onCommit={(name) => updateSubject(subject.id, { name })}
+                                className="font-medium w-full min-w-[200px]"
+                              />
+                              <select
+                                value={subject.semester}
+                                onChange={(e) => updateSubject(subject.id, { semester: Number(e.target.value) })}
+                                title="Semestre"
+                                className={`${editFieldClass} text-[10px] uppercase tracking-wider font-bold text-slate-500! self-start`}
+                              >
+                                {[1, 2].map(sem => <option key={sem} value={sem}>Semestre {sem}</option>)}
+                              </select>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="font-medium text-slate-800">{subject.name}</div>
+                              <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-bold">Semestre {subject.semester}</div>
+                            </>
+                          )}
                         </td>
                         <td className="p-4">
                           <div className="flex items-center gap-2 text-sm text-slate-600">
-                            {getCategoryIcon(subject.category)} {subject.category}
+                            {getCategoryIcon(subject.category)}
+                            {editMode ? (
+                              <EditableText
+                                value={subject.category}
+                                onCommit={(category) => updateSubject(subject.id, { category })}
+                                list="category-options"
+                                className="flex-1 min-w-[160px]"
+                              />
+                            ) : subject.category}
                           </div>
                         </td>
                         <td className="p-4">
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             {subject.tech.map((t, idx) => (
-                              <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                              <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
                                 {t}
+                                {editMode && (
+                                  <button
+                                    onClick={() => removeTech(subject.id, t)}
+                                    title={`Quitar ${t}`}
+                                    className="p-0 rounded bg-transparent text-indigo-400 hover:text-red-600"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
                               </span>
                             ))}
+                            {editMode && (
+                              <AddTextInput
+                                placeholder="Tecnología…"
+                                list="tech-options"
+                                onAdd={(t) => addTech(subject.id, t)}
+                                className="w-36 text-xs"
+                              />
+                            )}
                           </div>
                         </td>
+                        {editMode && (
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => deleteSubject(subject)}
+                              title="Eliminar asignatura"
+                              className="p-2 rounded-lg bg-transparent text-slate-400 hover:text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan={4} className="p-8 text-center text-slate-500">No se encontraron resultados.</td></tr>
+                    <tr><td colSpan={editMode ? 5 : 4} className="p-8 text-center text-slate-500">No se encontraron resultados.</td></tr>
                   )}
                 </tbody>
+                {editMode && (
+                  <tfoot>
+                    <tr className="border-t border-slate-200 bg-amber-50/40">
+                      <td colSpan={5} className="p-4">
+                        <AddTextInput
+                          placeholder="Nombre de la nueva asignatura (Enter para añadir)…"
+                          onAdd={(name) => {
+                            addSubject({ name, year: typeof selectedYear === 'number' ? selectedYear : 1 });
+                            setSearchTerm('');
+                          }}
+                          className="max-w-xl"
+                        />
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
