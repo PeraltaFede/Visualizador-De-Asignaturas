@@ -1002,9 +1002,8 @@ const App = () => {
         )}
         {/* Footer */}
         <div className="mt-12 pt-8 border-t border-slate-200 text-center text-slate-500 text-sm">
-          <p>2026 Universidad Loyola</p>
           <p className="mt-1 font-medium text-slate-600">
-            Desarrollado por: <span className="text-indigo-600 font-bold">Federico Peralta</span> |
+            Desarrollado por: <span className="text-indigo-600 font-bold">Federico Peralta para Universidad Loyola</span> |
             <a href="mailto:fdperalta@uloyola.es" className="ml-1 hover:text-indigo-800 underline transition-colors">fdperalta@uloyola.es</a>
           </p>
         </div>
